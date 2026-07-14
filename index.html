@@ -395,5 +395,17 @@
     </div>
 
     <script src="app.js"></script>
+        <!-- Offline Brain Activation -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(reg => console.log('Offline mode activated successfully!'))
+                    .catch(err => console.log('Offline mode failed:', err));
+            });
+        }
+    </script>
 </body>
 </html>
+
+
