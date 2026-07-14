@@ -1,0 +1,16 @@
+{
+  "name": "Bangladesh Railway Scheduler",
+  "short_name": "BR Schedule",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#006a4e",
+  "description": "Advanced routing engine and real-time railway informatics.",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
