@@ -8,9 +8,9 @@
   "description": "Advanced routing engine and real-time railway informatics.",
   "icons": [
     {
-      "src": "icon.svg",
+      "src": "logo.png",
       "sizes": "512x512",
-      "type": "image/svg+xml"
+      "type": "image/png"
     }
   ]
 }
