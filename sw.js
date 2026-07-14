@@ -3,7 +3,8 @@ const urlsToCache = [
   './',
   './index.html',
   './app.js',
-  './master_timetable.csv'
+  './master_timetable.csv',
+  './logo.png'
 ];
 
 // Install event: Save files to phone on first load
