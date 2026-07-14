@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pro Railway Scheduler</title>
+    <!-- Import PapaParse -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- Premium Typeface -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        /* Studio-Grade UI Variables */
+        :root {
+            --rail-emerald: #006a4e;
+            --rail-emerald-dark: #004d39;
+            --rail-ruby: #e63946;
+            --surface-glass: rgba(255, 255, 255, 0.85);
+            --surface-card: #ffffff;
+            --text-primary: #0f172a;
+            --text-secondary: #64748b;
+            --border-light: rgba(226, 232, 240, 0.8);
+            --shadow-float: 0 20px 40px -15px rgba(0, 106, 78, 0.15);
+            --shadow-card: 0 10px 30px -10px rgba(0, 0, 0, 0.08);
+            --shadow-inner: inset 0 2px 4px rgba(255, 255, 255, 0.5);
+            --radius-lg: 24px;
+            --radius-md: 16px;
+            --transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        /* Dynamic Mesh Background */
+        body { 
+            font-family: 'Plus Jakarta Sans', sans-serif; 
+            background-color: #f8fafc;
+            background-image: 
+                radial-gradient(at 0% 0%, hsla(152, 100%, 21%, 0.06) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, hsla(349, 100%, 56%, 0.05) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, hsla(152, 100%, 21%, 0.06) 0px, transparent 50%),
+                radial-gradient(at 0% 100%, hsla(349, 100%, 56%, 0.05) 0px, transparent 50%);
+            background-attachment: fixed;
+            color: var(--text-primary); 
+            line-height: 1.6; 
+            padding: 40px 20px; 
+            max-width: 900px; 
+            margin: 0 auto; 
+            min-height: 100vh;
+        }
+
+        /* Hero Header */
+        .app-header {
+            text-align: center;
+            margin-bottom: 50px;
+            animation: fadeInDown 0.8s ease-out;
+        }
+
+        .app-header h2 {
+            font-size: 3rem;
+            font-weight: 800;
+            margin: 0;
+            background: linear-gradient(135deg, var(--text-primary) 30%, var(--rail-emerald));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -1.5px;
+        }
+
+        .app-header p {
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 1.15rem;
+            margin-top: 8px;
+            letter-spacing: -0.2px;
+        }
+
+        /* Glassmorphism Cards */
+        .search-box { 
+            background: var(--surface-glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            padding: 35px; 
+            border-radius: var(--radius-lg); 
+            margin-bottom: 35px; 
+            box-shadow: var(--shadow-card), var(--shadow-inner);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            transition: var(--transition);
+        }
+
+        .search-box:hover {
+            box-shadow: var(--shadow-float), var(--shadow-inner);
+            transform: translateY(-3px);
+            border: 1px solid rgba(255, 255, 255, 1);
+        }
+
+        .search-box label {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 1.15rem;
+            color: var(--text-primary);
+            margin-bottom: 25px;
+            font-weight: 700;
+            letter-spacing: -0.3px;
+        }
+
+        /* Icon styling for labels */
+        .search-box label::before {
+            content: '';
+            display: block;
+            width: 8px;
+            height: 24px;
+            background: linear-gradient(to bottom, var(--rail-emerald), var(--rail-emerald-dark));
+            border-radius: 4px;
+        }
+
+        /* Inputs & Selects - Studio Style */
+        .input-group { margin-bottom: 20px; position: relative; }
+        
+        input, select { 
+            width: 100%; 
+            padding: 18px 24px; 
+            box-sizing: border-box; 
+            border: 1.5px solid var(--border-light);
+            border-radius: var(--radius-md);
+            font-size: 1.05rem;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            color: var(--text-primary);
+            background-color: rgba(255, 255, 255, 0.9);
+            transition: var(--transition);
+            font-weight: 500;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.01) inset;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: var(--rail-emerald);
+            background-color: #ffffff;
+            box-shadow: 0 0 0 4px rgba(0, 106, 78, 0.12), var(--shadow-inner);
+        }
+
+        input::placeholder {
+            color: #a1a1aa;
+            font-weight: 500;
+        }
+
+        /* Precision Action Buttons */
+        button { 
+            width: 100%;
+            padding: 18px 24px; 
+            cursor: pointer; 
+            background: linear-gradient(135deg, var(--rail-emerald) 0%, var(--rail-emerald-dark) 100%);
+            color: white; 
+            border: none; 
+            border-radius: var(--radius-md); 
+            font-size: 1.1rem;
+            font-weight: 700; 
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            letter-spacing: 0.3px;
+            transition: var(--transition);
+            box-shadow: 0 8px 16px rgba(0, 106, 78, 0.2);
+            position: relative;
+            overflow: hidden;
+        }
+
+        button::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0) 100%);
+            opacity: 0;
+            transition: var(--transition);
+        }
+
+        button:hover {
+            box-shadow: 0 12px 24px rgba(0, 106, 78, 0.3);
+            transform: translateY(-2px);
+        }
+
+        button:hover::after {
+            opacity: 1;
+        }
+
+        button:active {
+            transform: translateY(1px);
+            box-shadow: 0 4px 8px rgba(0, 106, 78, 0.2);
+        }
+
+        /* Floating Swap Pill */
+        .swap-btn { 
+            background: #ffffff; 
+            color: var(--text-primary); 
+            width: fit-content;
+            margin: -12px auto 12px auto; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px 24px;
+            border-radius: 40px;
+            font-size: 0.95rem;
+            font-weight: 600;
+            border: 1px solid var(--border-light);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+            z-index: 10;
+            position: relative;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(5px);
+        }
+
+        .swap-btn:hover {
+            border-color: var(--text-primary);
+            color: var(--text-primary);
+            background: #f8fafc;
+        }
+
+        /* Results Display Headers */
+        .tier-section { margin-top: 40px; }
+
+        .tier-section h3 { 
+            color: var(--text-primary);
+            font-size: 1.5rem;
+            font-weight: 800;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            letter-spacing: -0.5px;
+        }
+
+        #connectionResults h3 { color: #b45309; }
+
+        /* Premium Train Data Cards (Injected via JS) */
+        .train-card { 
+            background: var(--surface-card);
+            border: 1px solid var(--border-light);
+            border-radius: var(--radius-md);
+            padding: 24px; 
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+            transition: var(--transition);
+            position: relative;
+            line-height: 1.8;
+            font-size: 1.05rem;
+        }
+
+        .train-card:hover {
+            border-color: #cbd5e1;
+            box-shadow: var(--shadow-card);
+            transform: translateY(-2px);
+        }
+
+        /* Target the bolded train names injected by JS */
+        .train-card b:first-child {
+            color: var(--text-primary);
+            font-size: 1.25rem;
+            font-weight: 800;
+            letter-spacing: -0.3px;
+            display: inline-block;
+            margin-bottom: 8px;
+        }
+
+        /* UI Badges */
+        .duration-badge { 
+            background: rgba(0, 106, 78, 0.08); 
+            color: var(--rail-emerald); 
+            padding: 6px 14px; 
+            border-radius: 30px; 
+            font-size: 0.85em; 
+            font-weight: 700; 
+            display: inline-block;
+            margin-left: 12px;
+            vertical-align: middle;
+            border: 1px solid rgba(0, 106, 78, 0.1);
+        }
+        
+        .off-day { 
+            background: rgba(230, 57, 70, 0.08);
+            color: var(--rail-ruby); 
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 0.85em; 
+            font-weight: 700; 
+            display: inline-block;
+            margin-top: 16px;
+            border: 1px solid rgba(230, 57, 70, 0.15);
+        }
+        
+        .transfer-node { 
+            margin: 20px 0; 
+            padding: 20px; 
+            background: #fffbeb; 
+            border: 1px solid #fef3c7;
+            border-left: 6px solid #f59e0b; 
+            border-radius: 12px; 
+            font-size: 1rem; 
+            color: #92400e;
+            font-weight: 600;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.01);
+        }
+
+        /* Custom File Input Upload Area */
+        input[type="file"] {
+            padding: 24px;
+            background: rgba(255, 255, 255, 0.5);
+            border: 2px dashed #cbd5e1;
+            border-radius: var(--radius-md);
+            text-align: center;
+            cursor: pointer;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        input[type="file"]:hover {
+            border-color: var(--rail-emerald);
+            background: rgba(0, 106, 78, 0.02);
+        }
+
+        /* Subtle entrance animation */
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app-header">
+        <h2>Railway Scheduler</h2>
+        <p>Advanced routing engine and real-time informatics</p>
+    </div>
+    
+    <!-- Step 1: Upload CSV -->
+    
+
+    <!-- Step 2: Route Planner (A to B) -->
+    <div class="search-box">
+        <label>Plan Journey (Point-to-Point)</label>
+        <div class="input-group">
+            <input type="text" id="fromStation" placeholder="Departure Station..." autocomplete="off">
+        </div>
+        <button class="swap-btn" onclick="swapStations()">↑↓ Swap Stations</button>
+        <div class="input-group">
+            <input type="text" id="toStation" placeholder="Arrival Station..." autocomplete="off">
+        </div>
+        <div class="input-group">
+            <select id="sortBy">
+                <option value="departure">Sort Results By: Earliest Departure</option>
+                <option value="duration">Sort Results By: Shortest Journey Time</option>
+            </select>
+        </div>
+        <button onclick="findRoutes()">Search Available Routes</button>
+    </div>
+
+    <!-- Step 3: Station Board -->
+    <div class="search-box">
+        <label>Live Station Informatics</label>
+        <div class="input-group">
+            <input type="text" id="singleStation" placeholder="Enter Station Name..." autocomplete="off">
+        </div>
+        <button onclick="findStationBoard()">View Station Timetable</button>
+    </div>
+
+    <!-- Step 4: Train Details -->
+    <div class="search-box">
+        <label>Locomotive & Route Details</label>
+        <div class="input-group">
+            <input type="text" id="trainSearch" placeholder="Enter Train Name or No. (e.g., 705)" autocomplete="off">
+        </div>
+        <button onclick="findTrainDetails()">View Route Details</button>
+    </div>
+
+    <!-- Results Display -->
+    <div id="resultsContainer">
+        <!-- Direct Trains -->
+        <div id="intercityResults" class="tier-section" style="display:none;">
+            <h3>Direct Intercity Trains</h3>
+            <div id="intercityList"></div>
+        </div>
+        <div id="localResults" class="tier-section" style="display:none;">
+            <h3>Direct Local & Commuter</h3>
+            <div id="localList"></div>
+        </div>
+        
+        <!-- Connecting Trains -->
+        <div id="connectionResults" class="tier-section" style="display:none;">
+            <h3>Optimized Connections</h3>
+            <div id="connectionList"></div>
+        </div>
+        
+        <!-- Station / Train Details -->
+        <div id="generalResults" class="tier-section" style="display:none;">
+            <h3 id="generalResultsTitle">Results</h3>
+            <div id="generalResultsList"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
