@@ -1,19 +1,17 @@
 let masterTimetable = [];
 let uniqueStations = new Set(); 
+let stationGraph = {}; // NEW: The Advanced Pathfinder Graph
 
 // THIS IS YOUR DATABASE LINK
-// For now, it will look for the file in the same folder. 
-// Later, you will replace this with a live URL (e.g., "https://yourwebsite.com/master_timetable.csv")
 const DATABASE_URL = "master_timetable.csv"; 
 
 window.onload = function() {
     loadDatabase();
 };
 
-// Automatically fetch and parse the CSV in the background
 function loadDatabase() {
     Papa.parse(DATABASE_URL, {
-        download: true, // This tells PapaParse to fetch it from the web/folder
+        download: true, 
         header: true,
         dynamicTyping: true,
         skipEmptyLines: true,
@@ -27,7 +25,7 @@ function loadDatabase() {
         },
         error: function(err) {
             console.error("Failed to load database:", err);
-            alert("Could not connect to the timetable database. Please check your internet connection.");
+            alert("Could not connect to the timetable database.");
         }
     });
 }
@@ -40,6 +38,54 @@ function processLoadedData() {
         }
     });
     buildDropdowns(); 
+    buildPathfinderGraph(); // Build the graph map in the background
+}
+
+// ==========================================
+// 📍 THE NEW PATHFINDER GRAPH ENGINE
+// This maps every possible station-to-station jump so multi-leg searches are instant.
+// ==========================================
+function buildPathfinderGraph() {
+    stationGraph = {};
+    let trainsMap = {};
+    
+    masterTimetable.forEach(row => {
+        if (!row.train_no || !row.station_name) return; 
+        let tNo = String(row.train_no).trim();
+        if (!trainsMap[tNo]) trainsMap[tNo] = [];
+        trainsMap[tNo].push(row);
+    });
+
+    for (let tNo in trainsMap) {
+        let stops = trainsMap[tNo];
+        stops.sort((a, b) => parseInt(a.station_order) - parseInt(b.station_order));
+        
+        let tName = stops[0].train_name || "Unknown";
+        let rootName = tName.split(" ")[0].toUpperCase();
+        
+        for (let i = 0; i < stops.length; i++) {
+            let s1 = stops[i].station_name.toString().trim().toUpperCase();
+            if (!stationGraph[s1]) stationGraph[s1] = [];
+            
+            for (let j = i + 1; j < stops.length; j++) {
+                let s2 = stops[j].station_name.toString().trim().toUpperCase();
+                let depTime = stops[i].departure_time || stops[i].arrival_time;
+                let arrTime = stops[j].arrival_time || stops[j].departure_time;
+                if (!depTime || !arrTime) continue;
+                
+                stationGraph[s1].push({
+                    toStation: s2,
+                    trainNo: tNo,
+                    trainName: rootName, 
+                    fullName: tName,
+                    depTime: depTime,
+                    arrTime: arrTime,
+                    legDuration: calculateDuration(depTime, arrTime),
+                    offDay: stops[0].off_day || "None"
+                });
+            }
+        }
+    }
 }
 
 function buildDropdowns() {
@@ -53,7 +99,6 @@ function buildDropdowns() {
         document.getElementById('toStation').setAttribute('list', 'stationOptions');
         document.getElementById('singleStation').setAttribute('list', 'stationOptions');
     }
-    
     dataList.innerHTML = '';
     uniqueStations.forEach(station => {
         let option = document.createElement('option');
@@ -94,7 +139,7 @@ function calculateDuration(depTime, arrTime) {
     if (!depTime || !arrTime) return 999999; 
     let depMins = timeToMins(depTime);
     let arrMins = timeToMins(arrTime);
-    if (arrMins < depMins) arrMins += 24 * 60; // Crosses midnight
+    if (arrMins < depMins) arrMins += 24 * 60; 
     return arrMins - depMins;
 }
 
@@ -105,7 +150,109 @@ function formatDuration(totalMins) {
     return `${hours}h ${mins}m`;
 }
 
-// 4. Find Route 
+// ==========================================
+// 📍 THE DYNAMIC CONNECTION SEARCHER (BFS)
+// ==========================================
+function findGraphConnections(fromStation, toStation, maxLegs, bannedRoots) {
+    let validPaths = [];
+    let queue = [];
+
+    let startEdges = stationGraph[fromStation] || [];
+    for (let edge of startEdges) {
+        if (!bannedRoots.has(edge.trainName)) {
+            queue.push([{
+                fromStation: fromStation,
+                toStation: edge.toStation,
+                trainNo: edge.trainNo,
+                fullName: edge.fullName,
+                trainName: edge.trainName,
+                depTime: edge.depTime,
+                arrTime: edge.arrTime,
+                legDuration: edge.legDuration,
+                transferArr: null, 
+                layoverMins: 0
+            }]); 
+        }
+    }
+
+    while (queue.length > 0) {
+        let path = queue.shift();
+        let lastEdge = path[path.length - 1];
+        let currentLegCount = path.length;
+
+        if (lastEdge.toStation === toStation) {
+            if (currentLegCount <= maxLegs) validPaths.push(path);
+            continue;
+        }
+
+        if (currentLegCount < maxLegs) {
+            let nextEdges = stationGraph[lastEdge.toStation] || [];
+            for (let nextEdge of nextEdges) {
+                
+                let usedTrains = new Set(path.map(p => p.trainName));
+                if (usedTrains.has(nextEdge.trainName) || bannedRoots.has(nextEdge.trainName)) continue;
+                
+                let visitedStations = new Set(path.map(p => p.toStation));
+                visitedStations.add(fromStation);
+                if (visitedStations.has(nextEdge.toStation)) continue;
+
+                let arrMins = timeToMins(lastEdge.arrTime);
+                let depMins = timeToMins(nextEdge.depTime);
+                let layoverMins = depMins - arrMins;
+                if (layoverMins < 0) layoverMins += 24 * 60; // Midnight safety
+
+                if (layoverMins >= 0 && layoverMins <= 720) {
+                    let newLeg = {
+                        fromStation: lastEdge.toStation,
+                        toStation: nextEdge.toStation,
+                        trainNo: nextEdge.trainNo,
+                        fullName: nextEdge.fullName,
+                        trainName: nextEdge.trainName,
+                        depTime: nextEdge.depTime,
+                        arrTime: nextEdge.arrTime,
+                        legDuration: nextEdge.legDuration,
+                        transferArr: lastEdge.arrTime, 
+                        layoverMins: layoverMins
+                    };
+                    queue.push([...path, newLeg]);
+                }
+            }
+        }
+    }
+    return validPaths;
+}
+
+// Helper to draw the complex multi-leg HTML cards
+function renderDynamicPathCard(path) {
+    let firstLeg = path[0];
+    let lastLeg = path[path.length - 1];
+    
+    let totalDurMins = 0;
+    path.forEach(leg => totalDurMins += leg.legDuration + leg.layoverMins);
+    
+    let html = `
+        <div class="train-card">
+            <b>Departure: ${firstLeg.depTime}</b> <span class="duration-badge">Total Trip: ⏱ ${formatDuration(totalDurMins)}</span><br>
+            <span class="off-day">Legs: ${path.length}</span><br>
+            Leg 1: <b>${firstLeg.fullName} (${firstLeg.trainNo})</b><br>
+    `;
+    
+    for (let i = 1; i < path.length; i++) {
+        let currLeg = path[i];
+        html += `
+            <div class="transfer-node">
+                🔄 <b>Transfer at ${currLeg.fromStation}</b> (Wait: ${formatDuration(currLeg.layoverMins)})<br>
+                Arrive: ${currLeg.transferArr} | Next Train Departs: ${currLeg.depTime}
+            </div>
+            Leg ${i+1}: <b>${currLeg.fullName} (${currLeg.trainNo})</b><br>
+        `;
+    }
+    
+    html += `<b>Final Arrival: ${lastLeg.arrTime}</b></div>`;
+    return html;
+}
+
+// 4. MAIN FIND ROUTES FUNCTION
 function findRoutes() {
     if (masterTimetable.length === 0) return alert("Please load the CSV file first.");
 
@@ -125,7 +272,6 @@ function findRoutes() {
     connectionList.innerHTML = "";
     
     let validRoutes = [];
-    let connectingRoutes = [];
     let trainsMap = {};
 
     masterTimetable.forEach(row => {
@@ -161,101 +307,12 @@ function findRoutes() {
         }
     }
 
-    // B. FIND CONNECTING ROUTES 
-    // Create a list of direct train numbers AND names so we can ban them from connections
-    let directTrainNumbers = new Set(validRoutes.map(route => route.trainNo));
-    let directTrainNames = new Set(validRoutes.map(route => route.trainName));
-
-    let fromLegs = [];
-    let toLegs = [];
-
-    for (let tNo in trainsMap) {
-        let stops = trainsMap[tNo];
-        let trainName = stops[0].train_name || "Unknown";
-
-        // LOGIC FIX: Block if the Train Number OR the Train Name is already a direct route
-        if (directTrainNumbers.has(tNo) || directTrainNames.has(trainName)) {
-            continue; 
-        }
-
-        let startMatch = stops.find(s => s.station_name && s.station_name.toString().trim().toUpperCase() === fromStation);
-        if (startMatch) fromLegs.push({ tNo: tNo, stops: stops, startIndex: stops.indexOf(startMatch), tName: trainName });
-
-        let endMatch = stops.find(s => s.station_name && s.station_name.toString().trim().toUpperCase() === toStation);
-        if (endMatch) toLegs.push({ tNo: tNo, stops: stops, endIndex: stops.indexOf(endMatch), tName: trainName });
-    }
-
-    for (let leg1 of fromLegs) {
-        for (let leg2 of toLegs) {
-            
-            // LOGIC FIX: Check if Train Number is the same OR if the first word of the name matches (e.g., Bhawal)
-            let name1 = leg1.tName.split(" ")[0].toUpperCase();
-            let name2 = leg2.tName.split(" ")[0].toUpperCase();
-            
-            if (leg1.tNo === leg2.tNo || name1 === name2) continue; 
-
-            let validTransfers1 = leg1.stops.slice(leg1.startIndex + 1);
-            let validTransfers2 = leg2.stops.slice(0, leg2.endIndex);
-
-            for (let stop1 of validTransfers1) {
-                let transferStation = stop1.station_name.toUpperCase();
-                let stop2 = validTransfers2.find(s => s.station_name.toUpperCase() === transferStation);
-
-                if (stop2) {
-                    let arrTimeAtTransfer = stop1.arrival_time || stop1.departure_time;
-                    let depTimeAtTransfer = stop2.departure_time || stop2.arrival_time;
-                    
-                    if (arrTimeAtTransfer && depTimeAtTransfer) {
-                        let arrMins = timeToMins(arrTimeAtTransfer);
-                        let depMins = timeToMins(depTimeAtTransfer);
-                        
-                        // 🛠 THE MIDNIGHT BUG FIX 🛠
-                        let layoverMins = depMins - arrMins;
-                        if (layoverMins < 0) {
-                            layoverMins += 24 * 60; // If the layover crosses midnight, add 24 hours to the math!
-                        }
-                        
-                        // Ensure the transfer is valid and doesn't make the user wait more than 12 hours (720 minutes)
-                        if (layoverMins >= 0 && layoverMins <= 720) {
-                            let leg1Dur = calculateDuration(leg1.stops[leg1.startIndex].departure_time, arrTimeAtTransfer);
-                            let layoverDur = layoverMins; 
-                            let leg2Dur = calculateDuration(depTimeAtTransfer, leg2.stops[leg2.endIndex].arrival_time);
-                            let totalDur = leg1Dur + layoverDur + leg2Dur;
-                            
-                            connectingRoutes.push({
-                                leg1No: leg1.tNo,
-                                leg1Name: leg1.tName,
-                                leg2No: leg2.tNo,
-                                leg2Name: leg2.tName,
-                                transferStation: transferStation,
-                                depTime: leg1.stops[leg1.startIndex].departure_time,
-                                transferArr: arrTimeAtTransfer,
-                                transferDep: depTimeAtTransfer,
-                                arrTime: leg2.stops[leg2.endIndex].arrival_time,
-                                durationMins: totalDur,
-                                durationText: formatDuration(totalDur)
-                            });
-                            break; 
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Sort Direct Routes
+    // Sort & Render Direct Routes
     validRoutes.sort((a, b) => {
         if (sortPreference === "duration") return a.durationMins - b.durationMins;
         return String(a.depTime).padStart(5, '0').localeCompare(String(b.depTime).padStart(5, '0'));
     });
-    
-    // Sort Connections
-    connectingRoutes.sort((a, b) => {
-        if (sortPreference === "duration") return a.durationMins - b.durationMins;
-        return String(a.depTime).padStart(5, '0').localeCompare(String(b.depTime).padStart(5, '0'));
-    });
 
-    // Display Direct Routes
     let intercityCount = 0, localCount = 0;
     validRoutes.forEach(route => {
         let cardHtml = `
@@ -270,30 +327,54 @@ function findRoutes() {
 
     if (intercityCount > 0) document.getElementById("intercityResults").style.display = "block";
     if (localCount > 0) document.getElementById("localResults").style.display = "block";
-
     if (intercityCount === 0 && localCount === 0) {
         intercityList.innerHTML = "<p>No direct trains found for this route.</p>";
         document.getElementById("intercityResults").style.display = "block";
     }
 
-    // Display Connecting Routes
-    if (connectingRoutes.length > 0) {
-        connectingRoutes.forEach(conn => {
-            connectionList.innerHTML += `
-                <div class="train-card">
-                    <b>Departure: ${conn.depTime}</b> <span class="duration-badge">Total Trip: ⏱ ${conn.durationText}</span><br>
-                    Leg 1: <b>${conn.leg1Name} (${conn.leg1No})</b>
-                    
-                    <div class="transfer-node">
-                        🔄 <b>Transfer at ${conn.transferStation}</b><br>
-                        Arrive: ${conn.transferArr} | Next Train Departs: ${conn.transferDep}
-                    </div>
-                    
-                    Leg 2: <b>${conn.leg2Name} (${conn.leg2No})</b><br>
-                    <b>Final Arrival: ${conn.arrTime}</b>
-                </div>
-            `;
+    // B. DYNAMIC FALLBACK ROUTING SYSTEM
+    let directTrainRoots = new Set(validRoutes.map(route => route.trainName.split(" ")[0].toUpperCase()));
+    
+    // We pass '4' as max depth to gather all potential options quickly
+    let allConnections = findGraphConnections(fromStation, toStation, 4, directTrainRoots);
+    
+    let doubleRoutes = allConnections.filter(p => p.length === 2);
+    let tripleRoutes = allConnections.filter(p => p.length === 3);
+    let tetraRoutes  = allConnections.filter(p => p.length === 4);
+
+    let hasDirect = validRoutes.length > 0;
+    let hasDouble = doubleRoutes.length > 0;
+    
+    let routesToShow = [];
+
+    // YOUR EXACT SCENARIOS:
+    if (hasDirect) {
+        // Scenario A: Direct train found. Only show 2-leg connections. Ignore 3 and 4 leg.
+        routesToShow = doubleRoutes;
+    } else if (hasDouble) {
+        // Scenario B: No Direct, but Double found. Show 2-leg and 3-leg. Ignore 4 leg.
+        routesToShow = [...doubleRoutes, ...tripleRoutes];
+    } else {
+        // Scenario C: No Direct, No Double. Last resort: Show 3-leg and 4-leg.
+        routesToShow = [...tripleRoutes, ...tetraRoutes];
+    }
+
+    // Sort the final chosen connections
+    routesToShow.sort((a, b) => {
+        let durA = a.reduce((sum, leg) => sum + leg.legDuration + leg.layoverMins, 0);
+        let durB = b.reduce((sum, leg) => sum + leg.legDuration + leg.layoverMins, 0);
+        if (sortPreference === "duration") return durA - durB;
+        return String(a[0].depTime).padStart(5, '0').localeCompare(String(b[0].depTime).padStart(5, '0'));
+    });
+
+    // Render chosen connections to screen
+    if (routesToShow.length > 0) {
+        routesToShow.forEach(path => {
+            connectionList.innerHTML += renderDynamicPathCard(path);
         });
+        document.getElementById("connectionResults").style.display = "block";
+    } else if (!hasDirect) {
+        connectionList.innerHTML = "<p>No routes found (Direct or Connecting) for this journey.</p>";
         document.getElementById("connectionResults").style.display = "block";
     }
 }
