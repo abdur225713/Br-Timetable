@@ -42,8 +42,6 @@ function processLoadedData() {
     buildDropdowns(); 
 }
 
-// ... Keep your existing buildDropdowns(), findRoutes(), findStationBoard(), etc. below here ...
-
 function buildDropdowns() {
     let dataList = document.getElementById('stationOptions');
     if (!dataList) {
@@ -164,27 +162,37 @@ function findRoutes() {
     }
 
     // B. FIND CONNECTING ROUTES 
-    // Create a list of direct train numbers so we can ban them from connections
+    // Create a list of direct train numbers AND names so we can ban them from connections
     let directTrainNumbers = new Set(validRoutes.map(route => route.trainNo));
+    let directTrainNames = new Set(validRoutes.map(route => route.trainName));
 
     let fromLegs = [];
     let toLegs = [];
 
     for (let tNo in trainsMap) {
-        // LOGIC FIX: If this train is already a direct route, skip it entirely!
-        if (directTrainNumbers.has(tNo)) continue;
-
         let stops = trainsMap[tNo];
+        let trainName = stops[0].train_name || "Unknown";
+
+        // LOGIC FIX: Block if the Train Number OR the Train Name is already a direct route
+        if (directTrainNumbers.has(tNo) || directTrainNames.has(trainName)) {
+            continue; 
+        }
+
         let startMatch = stops.find(s => s.station_name && s.station_name.toString().trim().toUpperCase() === fromStation);
-        if (startMatch) fromLegs.push({ tNo: tNo, stops: stops, startIndex: stops.indexOf(startMatch) });
+        if (startMatch) fromLegs.push({ tNo: tNo, stops: stops, startIndex: stops.indexOf(startMatch), tName: trainName });
 
         let endMatch = stops.find(s => s.station_name && s.station_name.toString().trim().toUpperCase() === toStation);
-        if (endMatch) toLegs.push({ tNo: tNo, stops: stops, endIndex: stops.indexOf(endMatch) });
+        if (endMatch) toLegs.push({ tNo: tNo, stops: stops, endIndex: stops.indexOf(endMatch), tName: trainName });
     }
 
     for (let leg1 of fromLegs) {
         for (let leg2 of toLegs) {
-            if (leg1.tNo === leg2.tNo) continue; 
+            
+            // LOGIC FIX: Check if Train Number is the same OR if the first word of the name matches (e.g., Bhawal)
+            let name1 = leg1.tName.split(" ")[0].toUpperCase();
+            let name2 = leg2.tName.split(" ")[0].toUpperCase();
+            
+            if (leg1.tNo === leg2.tNo || name1 === name2) continue; 
 
             let validTransfers1 = leg1.stops.slice(leg1.startIndex + 1);
             let validTransfers2 = leg2.stops.slice(0, leg2.endIndex);
@@ -201,17 +209,24 @@ function findRoutes() {
                         let arrMins = timeToMins(arrTimeAtTransfer);
                         let depMins = timeToMins(depTimeAtTransfer);
                         
-                        if (arrMins <= depMins) {
+                        // 🛠 THE MIDNIGHT BUG FIX 🛠
+                        let layoverMins = depMins - arrMins;
+                        if (layoverMins < 0) {
+                            layoverMins += 24 * 60; // If the layover crosses midnight, add 24 hours to the math!
+                        }
+                        
+                        // Ensure the transfer is valid and doesn't make the user wait more than 12 hours (720 minutes)
+                        if (layoverMins >= 0 && layoverMins <= 720) {
                             let leg1Dur = calculateDuration(leg1.stops[leg1.startIndex].departure_time, arrTimeAtTransfer);
-                            let layoverDur = calculateDuration(arrTimeAtTransfer, depTimeAtTransfer);
+                            let layoverDur = layoverMins; 
                             let leg2Dur = calculateDuration(depTimeAtTransfer, leg2.stops[leg2.endIndex].arrival_time);
                             let totalDur = leg1Dur + layoverDur + leg2Dur;
                             
                             connectingRoutes.push({
                                 leg1No: leg1.tNo,
-                                leg1Name: leg1.stops[0].train_name,
+                                leg1Name: leg1.tName,
                                 leg2No: leg2.tNo,
-                                leg2Name: leg2.stops[0].train_name,
+                                leg2Name: leg2.tName,
                                 transferStation: transferStation,
                                 depTime: leg1.stops[leg1.startIndex].departure_time,
                                 transferArr: arrTimeAtTransfer,
