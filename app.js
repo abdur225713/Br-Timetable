@@ -1,8 +1,7 @@
 let masterTimetable = [];
 let uniqueStations = new Set(); 
-let stationGraph = {}; // NEW: The Advanced Pathfinder Graph
+let stationGraph = {}; 
 
-// THIS IS YOUR DATABASE LINK
 const DATABASE_URL = "master_timetable.csv"; 
 
 window.onload = function() {
@@ -38,13 +37,9 @@ function processLoadedData() {
         }
     });
     buildDropdowns(); 
-    buildPathfinderGraph(); // Build the graph map in the background
+    buildPathfinderGraph(); 
 }
 
-// ==========================================
-// 📍 THE NEW PATHFINDER GRAPH ENGINE
-// This maps every possible station-to-station jump so multi-leg searches are instant.
-// ==========================================
 function buildPathfinderGraph() {
     stationGraph = {};
     let trainsMap = {};
@@ -151,11 +146,15 @@ function formatDuration(totalMins) {
 }
 
 // ==========================================
-// 📍 THE DYNAMIC CONNECTION SEARCHER (BFS)
+// 📍 THE SAFE GRAPH SEARCH (PREVENTS FREEZING)
 // ==========================================
 function findGraphConnections(fromStation, toStation, maxLegs, bannedRoots) {
     let validPaths = [];
     let queue = [];
+    
+    // SAFETY BREAKER: Stops the browser from freezing if the route is too complex!
+    let iterations = 0; 
+    const MAX_ITERATIONS = 30000; 
 
     let startEdges = stationGraph[fromStation] || [];
     for (let edge of startEdges) {
@@ -176,6 +175,12 @@ function findGraphConnections(fromStation, toStation, maxLegs, bannedRoots) {
     }
 
     while (queue.length > 0) {
+        iterations++;
+        if (iterations > MAX_ITERATIONS) {
+            console.warn("Search limits reached! Stopping early to prevent freeze.");
+            break; 
+        }
+
         let path = queue.shift();
         let lastEdge = path[path.length - 1];
         let currentLegCount = path.length;
@@ -199,7 +204,7 @@ function findGraphConnections(fromStation, toStation, maxLegs, bannedRoots) {
                 let arrMins = timeToMins(lastEdge.arrTime);
                 let depMins = timeToMins(nextEdge.depTime);
                 let layoverMins = depMins - arrMins;
-                if (layoverMins < 0) layoverMins += 24 * 60; // Midnight safety
+                if (layoverMins < 0) layoverMins += 24 * 60; 
 
                 if (layoverMins >= 0 && layoverMins <= 720) {
                     let newLeg = {
@@ -222,7 +227,6 @@ function findGraphConnections(fromStation, toStation, maxLegs, bannedRoots) {
     return validPaths;
 }
 
-// Helper to draw the complex multi-leg HTML cards
 function renderDynamicPathCard(path) {
     let firstLeg = path[0];
     let lastLeg = path[path.length - 1];
@@ -252,7 +256,6 @@ function renderDynamicPathCard(path) {
     return html;
 }
 
-// 4. MAIN FIND ROUTES FUNCTION
 function findRoutes() {
     if (masterTimetable.length === 0) return alert("Please load the CSV file first.");
 
@@ -281,7 +284,6 @@ function findRoutes() {
         trainsMap[tNo].push(row);
     });
 
-    // A. FIND DIRECT ROUTES
     for (let tNo in trainsMap) {
         let stops = trainsMap[tNo];
         let startStop = stops.find(s => s.station_name && s.station_name.toString().trim().toUpperCase() === fromStation);
@@ -307,7 +309,6 @@ function findRoutes() {
         }
     }
 
-    // Sort & Render Direct Routes
     validRoutes.sort((a, b) => {
         if (sortPreference === "duration") return a.durationMins - b.durationMins;
         return String(a.depTime).padStart(5, '0').localeCompare(String(b.depTime).padStart(5, '0'));
@@ -332,34 +333,34 @@ function findRoutes() {
         document.getElementById("intercityResults").style.display = "block";
     }
 
-    // B. DYNAMIC FALLBACK ROUTING SYSTEM
+    // ==========================================
+    // 📍 THE PROGRESSIVE FALLBACK LOGIC
+    // ==========================================
     let directTrainRoots = new Set(validRoutes.map(route => route.trainName.split(" ")[0].toUpperCase()));
-    
-    // We pass '4' as max depth to gather all potential options quickly
-    let allConnections = findGraphConnections(fromStation, toStation, 4, directTrainRoots);
-    
-    let doubleRoutes = allConnections.filter(p => p.length === 2);
-    let tripleRoutes = allConnections.filter(p => p.length === 3);
-    let tetraRoutes  = allConnections.filter(p => p.length === 4);
-
-    let hasDirect = validRoutes.length > 0;
-    let hasDouble = doubleRoutes.length > 0;
-    
     let routesToShow = [];
 
-    // YOUR EXACT SCENARIOS:
-    if (hasDirect) {
-        // Scenario A: Direct train found. Only show 2-leg connections. Ignore 3 and 4 leg.
-        routesToShow = doubleRoutes;
-    } else if (hasDouble) {
-        // Scenario B: No Direct, but Double found. Show 2-leg and 3-leg. Ignore 4 leg.
-        routesToShow = [...doubleRoutes, ...tripleRoutes];
+    if (validRoutes.length > 0) {
+        // SCENARIO A: Direct exists! Only check for quick 2-leg routes (Super fast)
+        let connections = findGraphConnections(fromStation, toStation, 2, directTrainRoots);
+        routesToShow = connections.filter(p => p.length === 2);
     } else {
-        // Scenario C: No Direct, No Double. Last resort: Show 3-leg and 4-leg.
-        routesToShow = [...tripleRoutes, ...tetraRoutes];
+        // No Direct. Check up to 3 legs.
+        let connections = findGraphConnections(fromStation, toStation, 3, directTrainRoots);
+        let doubleRoutes = connections.filter(p => p.length === 2);
+        let tripleRoutes = connections.filter(p => p.length === 3);
+
+        if (doubleRoutes.length > 0) {
+            // SCENARIO B: Double exists! Show 2-leg and 3-leg.
+            routesToShow = [...doubleRoutes, ...tripleRoutes];
+        } else {
+            // SCENARIO C: Worst Case. Check up to 4 legs (Circuit breaker protects us here)
+            let deepConnections = findGraphConnections(fromStation, toStation, 4, directTrainRoots);
+            let deepTriple = deepConnections.filter(p => p.length === 3);
+            let tetraRoutes  = deepConnections.filter(p => p.length === 4);
+            routesToShow = [...deepTriple, ...tetraRoutes];
+        }
     }
 
-    // Sort the final chosen connections
     routesToShow.sort((a, b) => {
         let durA = a.reduce((sum, leg) => sum + leg.legDuration + leg.layoverMins, 0);
         let durB = b.reduce((sum, leg) => sum + leg.legDuration + leg.layoverMins, 0);
@@ -367,19 +368,17 @@ function findRoutes() {
         return String(a[0].depTime).padStart(5, '0').localeCompare(String(b[0].depTime).padStart(5, '0'));
     });
 
-    // Render chosen connections to screen
     if (routesToShow.length > 0) {
         routesToShow.forEach(path => {
             connectionList.innerHTML += renderDynamicPathCard(path);
         });
         document.getElementById("connectionResults").style.display = "block";
-    } else if (!hasDirect) {
+    } else if (validRoutes.length === 0) {
         connectionList.innerHTML = "<p>No routes found (Direct or Connecting) for this journey.</p>";
         document.getElementById("connectionResults").style.display = "block";
     }
 }
 
-// 5. Find Station Board
 function findStationBoard() {
     const station = document.getElementById("singleStation").value.trim().toUpperCase();
     if (!station) return alert("Enter a station name.");
@@ -409,7 +408,6 @@ function findStationBoard() {
     document.getElementById("generalResults").style.display = "block";
 }
 
-// 6. Find Full Train Route
 function findTrainDetails() {
     const query = document.getElementById("trainSearch").value.trim().toUpperCase();
     if (!query) return alert("Enter a train name or number.");
