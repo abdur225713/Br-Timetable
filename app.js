@@ -20,7 +20,7 @@ function loadDatabase() {
         complete: function(results) {
             masterTimetable = results.data;
             processLoadedData();
-            console.log("Database synchronized successfully! " + masterTimetable.length + " rows loaded.");
+            console.log("Database synchronized! " + masterTimetable.length + " rows loaded.");
         },
         error: function(err) {
             console.error("Failed to load database:", err);
@@ -31,11 +31,12 @@ function loadDatabase() {
 
 function processLoadedData() {
     uniqueStations.clear();
-    masterTimetable.forEach(row => {
+    for (let i = 0, len = masterTimetable.length; i < len; i++) {
+        let row = masterTimetable[i];
         if (row.station_name) {
             uniqueStations.add(row.station_name.toString().trim().toUpperCase());
         }
-    });
+    }
     buildDropdowns(); 
     buildPathfinderGraph(); 
 }
@@ -44,12 +45,13 @@ function buildPathfinderGraph() {
     stationGraph = {};
     let trainsMap = {};
     
-    masterTimetable.forEach(row => {
-        if (!row.train_no || !row.station_name) return; 
+    for (let i = 0, len = masterTimetable.length; i < len; i++) {
+        let row = masterTimetable[i];
+        if (!row.train_no || !row.station_name) continue; 
         let tNo = String(row.train_no).trim();
         if (!trainsMap[tNo]) trainsMap[tNo] = [];
         trainsMap[tNo].push(row);
-    });
+    }
 
     for (let tNo in trainsMap) {
         let stops = trainsMap[tNo];
@@ -58,11 +60,11 @@ function buildPathfinderGraph() {
         let tName = stops[0].train_name || "Unknown";
         let rootName = tName.split(" ")[0].toUpperCase();
         
-        for (let i = 0; i < stops.length; i++) {
+        for (let i = 0, len = stops.length; i < len; i++) {
             let s1 = stops[i].station_name.toString().trim().toUpperCase();
             if (!stationGraph[s1]) stationGraph[s1] = [];
             
-            for (let j = i + 1; j < stops.length; j++) {
+            for (let j = i + 1; j < len; j++) {
                 let s2 = stops[j].station_name.toString().trim().toUpperCase();
                 let depTime = stops[i].departure_time || stops[i].arrival_time;
                 let arrTime = stops[j].arrival_time || stops[j].departure_time;
@@ -146,18 +148,17 @@ function formatDuration(totalMins) {
 }
 
 // ==========================================
-// 📍 THE SAFE GRAPH SEARCH (PREVENTS FREEZING)
+// 📍 HIGH-SPEED GRAPH SEARCH (Micro-Optimized)
 // ==========================================
 function findGraphConnections(fromStation, toStation, maxLegs, bannedRoots) {
     let validPaths = [];
     let queue = [];
-    
-    // SAFETY BREAKER: Stops the browser from freezing if the route is too complex!
     let iterations = 0; 
-    const MAX_ITERATIONS = 30000; 
+    const MAX_ITERATIONS = 50000; 
 
     let startEdges = stationGraph[fromStation] || [];
-    for (let edge of startEdges) {
+    for (let i = 0, len = startEdges.length; i < len; i++) {
+        let edge = startEdges[i];
         if (!bannedRoots.has(edge.trainName)) {
             queue.push([{
                 fromStation: fromStation,
@@ -177,13 +178,13 @@ function findGraphConnections(fromStation, toStation, maxLegs, bannedRoots) {
     while (queue.length > 0) {
         iterations++;
         if (iterations > MAX_ITERATIONS) {
-            console.warn("Search limits reached! Stopping early to prevent freeze.");
+            console.warn("Search limit reached.");
             break; 
         }
 
         let path = queue.shift();
-        let lastEdge = path[path.length - 1];
         let currentLegCount = path.length;
+        let lastEdge = path[currentLegCount - 1];
 
         if (lastEdge.toStation === toStation) {
             if (currentLegCount <= maxLegs) validPaths.push(path);
@@ -192,14 +193,21 @@ function findGraphConnections(fromStation, toStation, maxLegs, bannedRoots) {
 
         if (currentLegCount < maxLegs) {
             let nextEdges = stationGraph[lastEdge.toStation] || [];
-            for (let nextEdge of nextEdges) {
+            
+            for (let i = 0, len = nextEdges.length; i < len; i++) {
+                let nextEdge = nextEdges[i];
+                if (bannedRoots.has(nextEdge.trainName)) continue;
+
+                // ULTRA-FAST ARRAY CHECKING (No 'new Set()' objects created)
+                let isTrainUsed = false;
+                let isStationVisited = (fromStation === nextEdge.toStation);
                 
-                let usedTrains = new Set(path.map(p => p.trainName));
-                if (usedTrains.has(nextEdge.trainName) || bannedRoots.has(nextEdge.trainName)) continue;
+                for (let p = 0; p < currentLegCount; p++) {
+                    if (path[p].trainName === nextEdge.trainName) isTrainUsed = true;
+                    if (path[p].toStation === nextEdge.toStation) isStationVisited = true;
+                }
                 
-                let visitedStations = new Set(path.map(p => p.toStation));
-                visitedStations.add(fromStation);
-                if (visitedStations.has(nextEdge.toStation)) continue;
+                if (isTrainUsed || isStationVisited) continue;
 
                 let arrMins = timeToMins(lastEdge.arrTime);
                 let depMins = timeToMins(nextEdge.depTime);
@@ -219,7 +227,13 @@ function findGraphConnections(fromStation, toStation, maxLegs, bannedRoots) {
                         transferArr: lastEdge.arrTime, 
                         layoverMins: layoverMins
                     };
-                    queue.push([...path, newLeg]);
+                    
+                    // Fast array copy
+                    let newPath = [];
+                    for(let p = 0; p < currentLegCount; p++) newPath.push(path[p]);
+                    newPath.push(newLeg);
+                    
+                    queue.push(newPath);
                 }
             }
         }
@@ -229,19 +243,22 @@ function findGraphConnections(fromStation, toStation, maxLegs, bannedRoots) {
 
 function renderDynamicPathCard(path) {
     let firstLeg = path[0];
-    let lastLeg = path[path.length - 1];
+    let pathLen = path.length;
+    let lastLeg = path[pathLen - 1];
     
     let totalDurMins = 0;
-    path.forEach(leg => totalDurMins += leg.legDuration + leg.layoverMins);
+    for (let i = 0; i < pathLen; i++) {
+        totalDurMins += path[i].legDuration + path[i].layoverMins;
+    }
     
     let html = `
         <div class="train-card">
             <b>Departure: ${firstLeg.depTime}</b> <span class="duration-badge">Total Trip: ⏱ ${formatDuration(totalDurMins)}</span><br>
-            <span class="off-day">Legs: ${path.length}</span><br>
+            <span class="off-day">Legs: ${pathLen}</span><br>
             Leg 1: <b>${firstLeg.fullName} (${firstLeg.trainNo})</b><br>
     `;
     
-    for (let i = 1; i < path.length; i++) {
+    for (let i = 1; i < pathLen; i++) {
         let currLeg = path[i];
         html += `
             <div class="transfer-node">
@@ -277,17 +294,23 @@ function findRoutes() {
     let validRoutes = [];
     let trainsMap = {};
 
-    masterTimetable.forEach(row => {
-        if (!row.train_no) return; 
+    for (let i = 0, len = masterTimetable.length; i < len; i++) {
+        let row = masterTimetable[i];
+        if (!row.train_no) continue; 
         let tNo = String(row.train_no).trim();
         if (!trainsMap[tNo]) trainsMap[tNo] = [];
         trainsMap[tNo].push(row);
-    });
+    }
 
     for (let tNo in trainsMap) {
         let stops = trainsMap[tNo];
-        let startStop = stops.find(s => s.station_name && s.station_name.toString().trim().toUpperCase() === fromStation);
-        let endStop = stops.find(s => s.station_name && s.station_name.toString().trim().toUpperCase() === toStation);
+        let startStop = null;
+        let endStop = null;
+        
+        for(let i=0; i<stops.length; i++){
+            if(stops[i].station_name && stops[i].station_name.toString().trim().toUpperCase() === fromStation) startStop = stops[i];
+            if(stops[i].station_name && stops[i].station_name.toString().trim().toUpperCase() === toStation) endStop = stops[i];
+        }
 
         if (startStop && endStop) {
             let startOrder = parseInt(startStop.station_order);
@@ -315,7 +338,8 @@ function findRoutes() {
     });
 
     let intercityCount = 0, localCount = 0;
-    validRoutes.forEach(route => {
+    for (let i = 0, len = validRoutes.length; i < len; i++) {
+        let route = validRoutes[i];
         let cardHtml = `
             <div class="train-card">
                 <b>${route.trainName} (Train: ${route.trainNo})</b> <span class="duration-badge">⏱ ${route.durationText}</span><br>
@@ -324,7 +348,7 @@ function findRoutes() {
             </div>`;
         if (route.tier === "Intercity") { intercityList.innerHTML += cardHtml; intercityCount++; } 
         else { localList.innerHTML += cardHtml; localCount++; }
-    });
+    }
 
     if (intercityCount > 0) document.getElementById("intercityResults").style.display = "block";
     if (localCount > 0) document.getElementById("localResults").style.display = "block";
@@ -333,45 +357,56 @@ function findRoutes() {
         document.getElementById("intercityResults").style.display = "block";
     }
 
-    // ==========================================
-    // 📍 THE PROGRESSIVE FALLBACK LOGIC
-    // ==========================================
-    let directTrainRoots = new Set(validRoutes.map(route => route.trainName.split(" ")[0].toUpperCase()));
+    let directTrainRoots = new Set();
+    for(let i = 0; i < validRoutes.length; i++){
+        directTrainRoots.add(validRoutes[i].trainName.split(" ")[0].toUpperCase());
+    }
+    
     let routesToShow = [];
 
     if (validRoutes.length > 0) {
-        // SCENARIO A: Direct exists! Only check for quick 2-leg routes (Super fast)
         let connections = findGraphConnections(fromStation, toStation, 2, directTrainRoots);
-        routesToShow = connections.filter(p => p.length === 2);
+        for(let i=0; i<connections.length; i++) {
+            if(connections[i].length === 2) routesToShow.push(connections[i]);
+        }
     } else {
-        // No Direct. Check up to 3 legs.
         let connections = findGraphConnections(fromStation, toStation, 3, directTrainRoots);
-        let doubleRoutes = connections.filter(p => p.length === 2);
-        let tripleRoutes = connections.filter(p => p.length === 3);
+        let doubleRoutes = [];
+        let tripleRoutes = [];
+        
+        for(let i=0; i<connections.length; i++) {
+            if(connections[i].length === 2) doubleRoutes.push(connections[i]);
+            if(connections[i].length === 3) tripleRoutes.push(connections[i]);
+        }
 
         if (doubleRoutes.length > 0) {
-            // SCENARIO B: Double exists! Show 2-leg and 3-leg.
-            routesToShow = [...doubleRoutes, ...tripleRoutes];
+            routesToShow = doubleRoutes.concat(tripleRoutes);
         } else {
-            // SCENARIO C: Worst Case. Check up to 4 legs (Circuit breaker protects us here)
             let deepConnections = findGraphConnections(fromStation, toStation, 4, directTrainRoots);
-            let deepTriple = deepConnections.filter(p => p.length === 3);
-            let tetraRoutes  = deepConnections.filter(p => p.length === 4);
-            routesToShow = [...deepTriple, ...tetraRoutes];
+            let deepTriple = [];
+            let tetraRoutes = [];
+            for(let i=0; i<deepConnections.length; i++) {
+                if(deepConnections[i].length === 3) deepTriple.push(deepConnections[i]);
+                if(deepConnections[i].length === 4) tetraRoutes.push(deepConnections[i]);
+            }
+            routesToShow = deepTriple.concat(tetraRoutes);
         }
     }
 
     routesToShow.sort((a, b) => {
-        let durA = a.reduce((sum, leg) => sum + leg.legDuration + leg.layoverMins, 0);
-        let durB = b.reduce((sum, leg) => sum + leg.legDuration + leg.layoverMins, 0);
+        let durA = 0, durB = 0;
+        for(let i=0; i<a.length; i++) durA += a[i].legDuration + a[i].layoverMins;
+        for(let i=0; i<b.length; i++) durB += b[i].legDuration + b[i].layoverMins;
         if (sortPreference === "duration") return durA - durB;
         return String(a[0].depTime).padStart(5, '0').localeCompare(String(b[0].depTime).padStart(5, '0'));
     });
 
     if (routesToShow.length > 0) {
-        routesToShow.forEach(path => {
-            connectionList.innerHTML += renderDynamicPathCard(path);
-        });
+        let finalHtml = "";
+        for(let i=0; i < routesToShow.length; i++){
+            finalHtml += renderDynamicPathCard(routesToShow[i]);
+        }
+        connectionList.innerHTML = finalHtml;
         document.getElementById("connectionResults").style.display = "block";
     } else if (validRoutes.length === 0) {
         connectionList.innerHTML = "<p>No routes found (Direct or Connecting) for this journey.</p>";
@@ -385,7 +420,14 @@ function findStationBoard() {
     
     hideAllResults();
     
-    let trainsAtStation = masterTimetable.filter(row => row.station_name && row.station_name.toString().trim().toUpperCase() === station);
+    let trainsAtStation = [];
+    for(let i=0; i<masterTimetable.length; i++){
+        let row = masterTimetable[i];
+        if (row.station_name && row.station_name.toString().trim().toUpperCase() === station) {
+            trainsAtStation.push(row);
+        }
+    }
+    
     if (trainsAtStation.length === 0) return alert("No trains found for this station.");
     
     trainsAtStation.sort((a, b) => {
@@ -394,14 +436,17 @@ function findStationBoard() {
         return timeA.localeCompare(timeB);
     });
     
-    let html = trainsAtStation.map(t => `
+    let html = "";
+    for(let i=0; i<trainsAtStation.length; i++){
+        let t = trainsAtStation[i];
+        html += `
         <div class="train-card">
             <b>${t.train_name || 'Unknown'} (${t.train_no})</b> - <small>${getTrainTier(t.train_no)}</small><br>
             Route: <b>${t.origin_station || 'N/A'}</b> ➔ <b>${t.destination_station || 'N/A'}</b><br>
             Arrives: <b>${t.arrival_time || '--:--'}</b> | Departs: <b>${t.departure_time || '--:--'}</b><br>
             <span class="off-day">Off-day: ${t.off_day || 'None'}</span>
-        </div>
-    `).join("");
+        </div>`;
+    }
 
     document.getElementById("generalResultsTitle").innerText = `Live Board: ${station}`;
     document.getElementById("generalResultsList").innerHTML = html;
@@ -414,22 +459,29 @@ function findTrainDetails() {
     
     hideAllResults();
     
-    let trainStops = masterTimetable.filter(row => 
-        (row.train_no && String(row.train_no).trim().toUpperCase() === query) || 
-        (row.train_name && String(row.train_name).trim().toUpperCase() === query)
-    );
+    let trainStops = [];
+    for(let i=0; i<masterTimetable.length; i++){
+        let row = masterTimetable[i];
+        if ((row.train_no && String(row.train_no).trim().toUpperCase() === query) || 
+            (row.train_name && String(row.train_name).trim().toUpperCase() === query)) {
+            trainStops.push(row);
+        }
+    }
     
     if (trainStops.length === 0) return alert("Train not found.");
     
     trainStops.sort((a, b) => parseInt(a.station_order) - parseInt(b.station_order));
     
     let trainInfo = trainStops[0];
-    let html = trainStops.map(t => `
+    let html = "";
+    for(let i=0; i<trainStops.length; i++){
+        let t = trainStops[i];
+        html += `
         <div class="train-card">
             Stop ${t.station_order}: <b>${t.station_name}</b><br>
             Arrives: ${t.arrival_time || '--:--'} | Departs: ${t.departure_time || '--:--'}
-        </div>
-    `).join("");
+        </div>`;
+    }
 
     document.getElementById("generalResultsTitle").innerText = `Route: ${trainInfo.train_name} (${trainInfo.train_no}) | Off-day: ${trainInfo.off_day || 'None'}`;
     document.getElementById("generalResultsList").innerHTML = html;
